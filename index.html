@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Web Painter - Ciihuy</title>
+  <style>
+    :root{
+      --sidebar-width:140px;
+      --bg:#f5f6f7;
+      --green:#2e9c47;
+      --panel-pad:12px;
+      --btn-height:36px;
+    }
+    html,body{height:100%;margin:0;font-family:Inter, Arial, Helvetica, sans-serif;background:var(--bg)}
+    .app{display:flex;height:100vh;gap:12px}
+    .sidebar{width:var(--sidebar-width);background:#fff;border-radius:8px;margin:12px;padding:var(--panel-pad);box-shadow:0 2px 6px rgba(0,0,0,0.08);display:flex;flex-direction:column;align-items:stretch}
+    .tool{display:inline-flex;align-items:center;justify-content:center;height:var(--btn-height);border-radius:6px;margin-bottom:10px;background:var(--green);color:#fff;border:none;cursor:pointer;font-weight:600}
+    .tool.emph{background:#3db35a}
+    .colorBox{height:36px;border-radius:4px;border:1px solid #ddd;display:flex;align-items:center;padding:6px;gap:6px}
+    .colorPreview{width:100%;height:22px;border-radius:4px;border:1px solid #ccc}
+    .controls{margin-top:8px}
+    .label{font-size:12px;color:#666;margin:6px 0 4px}
+    .download{margin-top:auto;background:#1184ff}
+    .canvas-wrap{flex:1;margin:12px;display:flex;align-items:stretch}
+    .stage{flex:1;background:white;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);overflow:hidden;position:relative}
+    canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
+    .topbar{position:absolute;left:8px;top:8px;background:rgba(255,255,255,0.9);padding:6px 8px;border-radius:6px;font-size:13px;color:#222}
+    .small{font-size:12px;color:#444}
+    .btn-row{display:flex;gap:6px}
+    .btn-ghost{background:#fff;color:#333;border:1px solid #e6e6e6}
+    input[type=range]{width:100%}
+    .footer-note{font-size:12px;color:#888;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <button class="tool" id="pencil">✏️ Pencil</button>
+      <button class="tool" id="brush">🖌️ Brush</button>
+      <button class="tool" id="eraser">🧽 Eraser</button>
+      <button class="tool" id="bucket">🪣 Paint Bucket</button>
+
+      <div class="controls">
+        <div class="label">Color</div>
+        <div class="colorBox">
+          <input type="color" id="color" value="#000000" style="width:34px;height:28px;border:0;padding:0">
+          <div class="colorPreview" id="colorPreview"></div>
+        </div>
+
+        <div class="label">Size</div>
+        <input type="range" id="size" min="1" max="80" value="6">
+        <div class="label">Preview</div>
+        <div style="height:36px;display:flex;align-items:center;justify-content:center;border:1px dashed #ddd;border-radius:4px;margin-bottom:8px">
+          <canvas id="preview" width="120" height="36"></canvas>
+        </div>
+
+        <div class="label">Target</div>
+        <select id="target" style="width:100%;height:34px;border-radius:6px;border:1px solid #e6e6e6">
+          <option value="original">Original (canvas)</option>
+          <option value="1080">1080p (1920×1080)</option>
+          <option value="720">720p (1280×720)</option>
+          <option value="480">480p (854×480)</option>
+        </select>
+      </div>
+
+      <button class="tool download" id="download">💾 Download Image</button>
+      <div class="footer-note">Tip: gunakan mouse atau layar sentuh. Klik Paint Bucket untuk mengisi area.</div>
+    </div>
+
+    <div class="canvas-wrap">
+      <div class="stage">
+        <div class="topbar small">Web Painter — Ciihuy</div>
+        <canvas id="draw"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Basic setup
+    const canvas = document.getElementById('draw');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const preview = document.getElementById('preview');
+    const pctx = preview.getContext('2d');
+
+    // Tools
+    const pencilBtn = document.getElementById('pencil');
+    const brushBtn = document.getElementById('brush');
+    const eraserBtn = document.getElementById('eraser');
+    const bucketBtn = document.getElementById('bucket');
+    const colorInput = document.getElementById('color');
+    const colorPreview = document.getElementById('colorPreview');
+    const sizeInput = document.getElementById('size');
+    const downloadBtn = document.getElementById('download');
+
+    let tool = 'pencil';
+    let drawing = false;
+    let last = {x:0,y:0};
+
+    // Responsive canvas sizing
+    function resizeCanvasToDisplaySize() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.floor(rect.width * dpr);
+      const height = Math.floor(rect.height * dpr);
+      if (canvas.width !== width || canvas.height !== height) {
+        // preserve content
+        const old = ctx.getImageData(0,0,canvas.width,canvas.height);
+        canvas.width = width;
+        canvas.height = height;
+        ctx.putImageData(old,0,0);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+      }
+    }
+
+    // Initialize a white background
+    function initCanvas() {
+      canvas.width = Math.floor(canvas.clientWidth * (window.devicePixelRatio||1));
+      canvas.height = Math.floor(canvas.clientHeight * (window.devicePixelRatio||1));
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+    }
+
+    // Set up size preview
+    function drawPreview() {
+      pctx.clearRect(0,0,preview.width,preview.height);
+      const s = sizeInput.value * (preview.width/120);
+      pctx.beginPath();
+      pctx.arc(preview.width/2, preview.height/2, s/2, 0, Math.PI*2);
+      pctx.fillStyle = colorInput.value;
+      pctx.fill();
+    }
+
+    // Pointer helpers
+    function getPointer(e){
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      let clientX, clientY;
+      if (e.touches && e.touches[0]) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+      else { clientX = e.clientX; clientY = e.clientY; }
+      return { x: Math.round((clientX - rect.left) * dpr), y: Math.round((clientY - rect.top) * dpr) };
+    }
+
+    // Drawing functions
+    function beginDraw(pt) {
+      drawing = true;
+      last = pt;
+      ctx.beginPath();
+      ctx.moveTo(pt.x, pt.y);
+    }
+    function strokeTo(pt) {
+      if (!drawing) return;
+      ctx.lineTo(pt.x, pt.y);
+      ctx.stroke();
+      last = pt;
+    }
+    function endDraw() {
+      drawing = false;
+      ctx.closePath();
+    }
+
+    // Flood fill (paint bucket)
+    function floodFill(startX, startY, fillColor) {
+      const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+      const w = img.width, h = img.height;
+      const data = new Uint32Array(img.data.buffer);
+
+      const dpr = 1; // already accounted in canvas size
+      const idx = startY * w + startX;
+      const targetColor = data[idx];
+      const fillR = parseInt(fillColor.substr(1,2),16);
+      const fillG = parseInt(fillColor.substr(3,2),16);
+      const fillB = parseInt(fillColor.substr(5,2),16);
+      const fillA = 255;
+      const fillInt = (fillA<<24) | (fillB<<16) | (fillG<<8) | (fillR);
+
+      if (targetColor === fillInt) {
+        return; // nothing to do
+      }
+
+      const stack = [idx];
+      while(stack.length){
+        const current = stack.pop();
+        if (data[current] !== targetColor) continue;
+        let x = current % w;
+        let y = Math.floor(current / w);
+
+        // move to leftmost pixel in the contiguous span
+        let left = current;
+        while(x>0 && data[left-1] === targetColor){ left--; x--; }
+        // move to right filling and push neighbors
+        let right = left;
+        while(right < left + (w) && data[right] === targetColor){
+          data[right] = fillInt;
+          const ry = Math.floor(right / w);
+          // push pixel above
+          if (ry > 0 && data[right - w] === targetColor) stack.push(right - w);
+          // push pixel below
+          if (ry < h-1 && data[right + w] === targetColor) stack.push(right + w);
+          right++;
+        }
+      }
+
+      // write back
+      ctx.putImageData(img, 0, 0);
+    }
+
+    // Tool change
+    function setTool(t){
+      tool = t;
+      [pencilBtn,brushBtn,eraserBtn,bucketBtn].forEach(b=>b.classList.remove('emph'));
+      if (t==='pencil') pencilBtn.classList.add('emph');
+      if (t==='brush') brushBtn.classList.add('emph');
+      if (t==='eraser') eraserBtn.classList.add('emph');
+      if (t==='bucket') bucketBtn.classList.add('emph');
+
+      if (t==='eraser') canvas.style.cursor = 'cell';
+      else canvas.style.cursor = 'crosshair';
+    }
+
+    // Apply drawing style
+    function applyStyle(){
+      const size = Number(sizeInput.value) * (window.devicePixelRatio || 1);
+      ctx.lineWidth = size;
+      ctx.strokeStyle = colorInput.value;
+      ctx.globalCompositeOperation = (tool === 'eraser') ? 'destination-out' : 'source-over';
+    }
+
+    // Events
+    pencilBtn.addEventListener('click', ()=>{ setTool('pencil'); applyStyle(); });
+    brushBtn.addEventListener('click', ()=>{ setTool('brush'); applyStyle(); });
+    eraserBtn.addEventListener('click', ()=>{ setTool('eraser'); applyStyle(); });
+    bucketBtn.addEventListener('click', ()=>{ setTool('bucket'); applyStyle(); });
+
+    colorInput.addEventListener('input', ()=>{ colorPreview.style.background = colorInput.value; drawPreview(); applyStyle(); });
+    sizeInput.addEventListener('input', ()=>{ drawPreview(); applyStyle(); });
+
+    // Pointer events
+    function onPointerDown(e){
+      const pt = getPointer(e);
+      if (tool === 'bucket') {
+        floodFill(pt.x, pt.y, colorInput.value);
+      } else {
+        applyStyle();
+        beginDraw(pt);
+        strokeTo(pt);
+      }
+      e.preventDefault();
+    }
+    function onPointerMove(e){
+      if (!drawing) return;
+      const pt = getPointer(e);
+      strokeTo(pt);
+      e.preventDefault();
+    }
+    function onPointerUp(e){ endDraw(); }
+
+    // Attach pointer/touch listeners
+    canvas.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+
+    // Download
+    downloadBtn.addEventListener('click', ()=>{
+      // export at selected target size
+      const target = document.getElementById('target').value;
+      let outW = canvas.width, outH = canvas.height;
+      if (target === '1080') { outW = 1920 * (window.devicePixelRatio||1); outH = 1080 * (window.devicePixelRatio||1); }
+      if (target === '720') { outW = 1280 * (window.devicePixelRatio||1); outH = 720 * (window.devicePixelRatio||1); }
+      if (target === '480') { outW = 854 * (window.devicePixelRatio||1); outH = 480 * (window.devicePixelRatio||1); }
+
+      // create a temporary canvas to scale the image
+      const tmp = document.createElement('canvas');
+      tmp.width = outW; tmp.height = outH;
+      const tctx = tmp.getContext('2d');
+      // fill white behind (important)
+      tctx.fillStyle = '#ffffff'; tctx.fillRect(0,0,tmp.width,tmp.height);
+      // draw scaled
+      tctx.drawImage(canvas, 0, 0, tmp.width, tmp.height);
+      const link = document.createElement('a');
+      link.download = 'ciihuy-paint-' + new Date().toISOString().replace(/[:.]/g,'-') + '.png';
+      link.href = tmp.toDataURL('image/png');
+      link.click();
+    });
+
+    // Initialize
+    window.addEventListener('resize', ()=>{ /* keep responsive but do not crush drawing */ });
+    initCanvas();
+    setTool('pencil');
+    drawPreview();
+
+    // Make the canvas fill the stage dynamically
+    function fitCanvas() {
+      const stage = document.querySelector('.stage');
+      canvas.style.width = (stage.clientWidth) + 'px';
+      canvas.style.height = (stage.clientHeight) + 'px';
+      // preserve content and scale
+      const old = ctx.getImageData(0,0,canvas.width,canvas.height);
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(stage.clientWidth * dpr);
+      canvas.height = Math.floor(stage.clientHeight * dpr);
+      ctx.putImageData(old,0,0);
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    }
+    // On first load and when window resizes
+    function relayout(){
+      // create a temp image of contents to avoid losing on resize when dimensions change
+      const s = canvas.toDataURL();
+      fitCanvas();
+      // draw background white
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      const img = new Image();
+      img.onload = ()=>{ ctx.drawImage(img,0,0,canvas.width,canvas.height); };
+      img.src = s;
+    }
+    window.addEventListener('load', relayout);
+    window.addEventListener('resize', ()=>{ relayout(); });
+
+    // Prevent scrolling on touch inside canvas
+    canvas.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+    canvas.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
+
+  </script>
+</body>
+</html>
